@@ -3,179 +3,200 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>孕期體重雲端追蹤器</title>
+    <title>孕期體重小管家</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .pink-gradient { background: linear-gradient(180deg, #ed4b91 0%, #e8438e 100%); }
+        .card-shadow { box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    </style>
 </head>
-<body class="bg-pink-50 min-h-screen p-4 font-sans">
+<body class="bg-[#fff9fa] min-h-screen">
 
-    <div class="max-w-md mx-auto bg-white rounded-3xl shadow-lg overflow-hidden p-6">
-        <h1 class="text-2xl font-bold text-pink-600 mb-2">🤰 孕期體重小管家</h1>
-        
-        <div class="bg-pink-100 rounded-xl p-4 mb-6">
-            <p class="text-gray-700">今天是：<span id="currentDate" class="font-bold"></span></p>
-            <p class="text-gray-700">目前週數：<span id="currentWeek" class="text-pink-600 font-bold text-xl">--</span></p>
-        </div>
+    <div class="pink-gradient text-white pt-10 pb-16 px-6 rounded-b-[40px] text-center shadow-lg">
+        <h1 class="text-2xl font-bold flex justify-center items-center gap-2">🤰 孕期體重小管家</h1>
+        <p class="opacity-90 mt-1">預產期：2026/04/15</p>
+    </div>
 
-        <div class="space-y-4 mb-6">
-            <div>
-                <label class="block text-sm font-medium text-gray-700">輸入今日體重 (kg)</label>
-                <input type="number" id="weightInput" step="0.1" class="w-full mt-1 p-3 border border-pink-200 rounded-xl focus:ring-pink-500 outline-none">
+    <div class="max-w-md mx-auto px-5 -mt-10">
+        <div class="flex gap-4 mb-6">
+            <div class="bg-white rounded-[25px] p-4 flex-1 text-center card-shadow border border-pink-50">
+                <p class="text-pink-400 text-xs font-medium mb-1">目前週數</p>
+                <p id="currentWeek" class="text-[#ed4b91] text-xl font-black">--週 + --天</p>
             </div>
-            <button onclick="handleSave()" id="saveBtn" class="w-full bg-pink-500 text-white py-3 rounded-xl font-bold hover:bg-pink-600 transition">儲存至雲端</button>
+            <div class="bg-white rounded-[25px] p-4 flex-1 text-center card-shadow border border-pink-50">
+                <p class="text-blue-400 text-xs font-medium mb-1">總共增重</p>
+                <p id="totalWeightGain" class="text-blue-500 text-xl font-black">-- kg</p>
+            </div>
         </div>
 
-        <div id="resultCard" class="hidden rounded-xl p-4 mb-6 text-center border-2">
-            <p id="resultText" class="text-lg font-bold"></p>
-            <p id="suggestionText" class="text-sm mt-1"></p>
+        <div class="bg-white rounded-[30px] p-6 mb-6 card-shadow border border-pink-50">
+            <div class="flex gap-3 mb-4">
+                <div id="todayDisplay" class="bg-gray-100 rounded-xl px-4 py-3 text-gray-600 flex-1 text-sm flex items-center justify-center font-bold text-center">
+                    載入中...
+                </div>
+                <input type="number" id="weightInput" placeholder="kg" step="0.1"
+                    class="bg-white border border-gray-200 rounded-xl px-4 py-3 flex-1 outline-none focus:border-pink-300 text-center font-bold text-lg">
+            </div>
+            <button onclick="handleSave()" id="saveBtn" 
+                class="w-full pink-gradient text-white py-4 rounded-2xl font-black text-lg shadow-md active:scale-95 transition">
+                儲存紀錄
+            </button>
         </div>
 
-        <div class="mt-4">
-            <canvas id="weightChart"></canvas>
+        <div id="statusAlert" class="hidden rounded-full py-3 px-6 text-center font-bold mb-6 card-shadow border animate-pulse"></div>
+
+        <div class="bg-white rounded-[30px] p-4 mb-8 card-shadow border border-pink-50">
+            <canvas id="weightChart" style="max-height: 180px;"></canvas>
         </div>
+
+        <div class="flex justify-between items-center mb-4 px-2">
+            <h3 class="font-bold text-gray-700 text-lg">歷史清單</h3>
+            <button onclick="clearLocalStorage()" class="text-gray-400 text-xs underline">清除本地紀錄</button>
+        </div>
+        <div id="historyList" class="space-y-3 pb-10"></div>
     </div>
 
     <script>
-        // --- 設定區 ---
-        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwAp65Jjx4XCkV6pG1augL35H9rFuI-2vFewT3hIUMxniqYkovP8bu-x7bJQYvPcZUWpA/exec';
+        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwAp65Jjx4XCkV6pG1augL35H9rFuI-2vFewT3hIUMxniqYkovP8bu-x7bJQYvPcZUWpA/exec'; 
         const PRE_WEIGHT = 52.3;
         const DUE_DATE = new Date('2026-04-15');
-        
-        let weightChart;
+        let myChart;
 
-        // 初始化：計算週數並讀取資料
         window.onload = () => {
             const today = new Date();
-            document.getElementById('currentDate').innerText = today.toLocaleDateString();
+            document.getElementById('todayDisplay').innerText = `${today.getMonth()+1}月${today.getDate()}日`;
             calculateWeeks();
-            fetchHistory(); // 從 Google Sheets 抓資料
+            loadAndRender();
         };
 
         function calculateWeeks() {
             const totalDays = 280;
-            const diffTime = DUE_DATE - new Date();
-            const daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            const diff = DUE_DATE - new Date();
+            const daysLeft = Math.ceil(diff / (1000 * 60 * 60 * 24));
             const currentDays = totalDays - daysLeft;
-            const weeks = Math.floor(currentDays / 7);
-            const days = currentDays % 7;
-            document.getElementById('currentWeek').innerText = `${weeks} 週 + ${days} 天`;
-            return weeks;
+            const w = Math.floor(currentDays / 7);
+            const d = currentDays % 7;
+            document.getElementById('currentWeek').innerText = `${w}週 + ${d}天`;
+            return w;
         }
 
-        // 讀取 Google Sheets 資料
-        async function fetchHistory() {
-            try {
-                const response = await fetch(SCRIPT_URL);
-                const data = await response.json(); 
-                // data 格式預期為: [[日期, 週數, 體重, 狀態], ...]
-                updateChart(data);
-            } catch (e) {
-                console.error('讀取失敗', e);
-                updateChart([]); // 失敗時至少顯示初始體重
-            }
-        }
-
-        // 儲存邏輯
         async function handleSave() {
             const weight = parseFloat(document.getElementById('weightInput').value);
-            if (!weight) return alert('請輸入體重');
-            
+            if (!weight) return alert("請輸入體 weight");
+
             const btn = document.getElementById('saveBtn');
             btn.disabled = true;
-            btn.innerText = '儲存中...';
+            btn.innerText = "同步至雲端...";
 
             const weekStr = document.getElementById('currentWeek').innerText;
-            const statusInfo = getWeightStatus(weight);
-            
-            // 顯示本地判斷結果
-            showResult(statusInfo);
+            const weekNum = parseInt(weekStr);
+            const statusObj = checkStatus(weight, weekNum);
 
-            // POST 到 Google Sheets
+            const newData = {
+                date: new Date().toLocaleDateString(),
+                weight: weight,
+                week: weekStr,
+                status: statusObj.text
+            };
+
             try {
+                // 發送到 Google Sheets
                 await fetch(SCRIPT_URL, {
                     method: 'POST',
                     mode: 'no-cors',
-                    body: JSON.stringify({
-                        weight: weight,
-                        week: weekStr,
-                        status: statusInfo.text
-                    })
+                    cache: 'no-cache',
+                    body: JSON.stringify(newData)
                 });
-                alert('雲端同步成功！');
-                fetchHistory(); // 重新抓取資料更新圖表
+                
+                // 儲存到本地
+                let history = JSON.parse(localStorage.getItem('weightHistory') || '[]');
+                history.unshift(newData);
+                localStorage.setItem('weightHistory', JSON.stringify(history));
+                
+                showAlert(statusObj);
+                loadAndRender();
+                alert("儲存成功！資料已同步至 Google Sheets。");
+                document.getElementById('weightInput').value = '';
             } catch (e) {
-                alert('同步失敗，但已為您顯示判定結果');
+                alert("網路連線問題，請稍後再試。");
             } finally {
                 btn.disabled = false;
-                btn.innerText = '儲存至雲端';
+                btn.innerText = "儲存紀錄";
             }
         }
 
-        function getWeightStatus(weight) {
-            const week = calculateWeeks();
-            let minG = 1, maxG = 2;
-            if (week >= 13) {
-                minG = 1 + (week - 12) * 0.4;
-                maxG = 2 + (week - 12) * 0.5;
-            }
-            const minW = (PRE_WEIGHT + minG).toFixed(1);
-            const maxW = (PRE_WEIGHT + maxG).toFixed(1);
-
-            if (weight > maxW) return { color: 'red', text: '超標', range: `${minW}~${maxW}` };
-            if (weight < minW) return { color: 'yellow', text: '偏輕', range: `${minW}~${maxW}` };
-            return { color: 'green', text: '非常合理', range: `${minW}~${maxW}` };
+        function checkStatus(w, week) {
+            let min = PRE_WEIGHT + (week < 13 ? 1 : 1 + (week-12)*0.4);
+            let max = PRE_WEIGHT + (week < 13 ? 2 : 2 + (week-12)*0.5);
+            if (w > max) return { text: `超標了！(上限: ${max.toFixed(1)}kg)`, color: 'bg-red-50 text-red-500 border-red-100' };
+            if (w < min) return { text: `偏輕了！(下限: ${min.toFixed(1)}kg)`, color: 'bg-blue-50 text-blue-500 border-blue-100' };
+            return { text: `非常合理！(範圍: ${min.toFixed(1)}~${max.toFixed(1)}kg)`, color: 'bg-green-50 text-green-500 border-green-100' };
         }
 
-        function showResult(info) {
-            const card = document.getElementById('resultCard');
-            const resT = document.getElementById('resultText');
-            card.classList.remove('hidden');
+        function showAlert(obj) {
+            const el = document.getElementById('statusAlert');
+            el.className = `block rounded-full py-3 px-6 text-center font-bold mb-6 card-shadow border ${obj.color}`;
+            el.innerText = `💡 ${obj.text}`;
+            el.classList.remove('hidden');
+        }
+
+        function loadAndRender() {
+            const history = JSON.parse(localStorage.getItem('weightHistory') || '[]');
+            const listEl = document.getElementById('historyList');
             
-            if (info.color === 'red') {
-                card.className = 'rounded-xl p-4 mb-6 text-center border-2 border-red-500 bg-red-50';
-                resT.className = 'text-red-600 font-bold text-xl';
-                resT.innerText = '❌ ' + info.text;
-            } else if (info.color === 'green') {
-                card.className = 'rounded-xl p-4 mb-6 text-center border-2 border-green-500 bg-green-50';
-                resT.className = 'text-green-600 font-bold text-xl';
-                resT.innerText = '✅ ' + info.text;
-            } else {
-                card.className = 'rounded-xl p-4 mb-6 text-center border-2 border-yellow-500 bg-yellow-50';
-                resT.className = 'text-yellow-600 font-bold text-xl';
-                resT.innerText = '⚖️ ' + info.text;
+            if (history.length > 0) {
+                document.getElementById('totalWeightGain').innerText = `${(history[0].weight - PRE_WEIGHT).toFixed(1)} kg`;
             }
-            document.getElementById('suggestionText').innerText = `建議範圍：${info.range} kg`;
+
+            listEl.innerHTML = history.map(item => `
+                <div class="bg-white rounded-2xl p-4 flex justify-between items-center card-shadow border border-gray-50">
+                    <div>
+                        <p class="text-[10px] text-gray-400 font-bold">${item.date}</p>
+                        <p class="font-black text-gray-700 text-lg">${item.weight} kg <span class="text-pink-400 text-sm ml-1">${item.week}</span></p>
+                    </div>
+                    <div class="text-xs font-bold px-3 py-1 rounded-full ${item.status.includes('合理')?'text-green-500 bg-green-50':'text-orange-500 bg-orange-50'}">
+                        ${item.status.split('！')[0]}
+                    </div>
+                </div>
+            `).join('');
+
+            updateChart(history);
         }
 
-        function updateChart(historyData) {
+        function updateChart(history) {
             const ctx = document.getElementById('weightChart').getContext('2d');
-            
-            // 整理標籤與數值 (加入懷孕前作為起點)
-            let labels = ['懷孕前'];
-            let weights = [PRE_WEIGHT];
-            
-            historyData.forEach(row => {
-                // row[0] 是日期, row[2] 是體重
-                labels.push(new Date(row[0]).toLocaleDateString());
-                weights.push(row[2]);
-            });
+            const chartData = [...history].reverse().slice(-7); // 只顯示最近 7 筆
+            const labels = chartData.map(i => i.date.split('/')[2] + '日');
+            const values = chartData.map(i => i.weight);
 
-            if (weightChart) weightChart.destroy();
-            weightChart = new Chart(ctx, {
+            if (myChart) myChart.destroy();
+            myChart = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: labels,
                     datasets: [{
-                        label: '體重趨勢 (kg)',
-                        data: weights,
-                        borderColor: '#db2777',
-                        backgroundColor: 'rgba(219, 39, 119, 0.1)',
-                        fill: true,
-                        tension: 0.3
+                        data: values,
+                        borderColor: '#ed4b91',
+                        borderWidth: 3,
+                        pointBackgroundColor: '#ed4b91',
+                        tension: 0.4,
+                        fill: false
                     }]
                 },
-                options: { responsive: true }
+                options: { 
+                    plugins: { legend: { display: false } },
+                    scales: { y: { beginAtZero: false } }
+                }
             });
+        }
+
+        function clearLocalStorage() {
+            if(confirm("確定要清除手機本地紀錄嗎？")) {
+                localStorage.removeItem('weightHistory');
+                location.reload();
+            }
         }
     </script>
 </body>
