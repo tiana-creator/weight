@@ -45,20 +45,21 @@
             </button>
         </div>
 
-        <div id="statusAlert" class="hidden rounded-full py-3 px-6 text-center font-bold mb-6 card-shadow border animate-pulse"></div>
-
         <div class="bg-white rounded-[30px] p-4 mb-8 card-shadow border border-pink-50">
             <canvas id="weightChart" style="max-height: 180px;"></canvas>
         </div>
 
         <div class="flex justify-between items-center mb-4 px-2">
             <h3 class="font-bold text-gray-700 text-lg">歷史清單</h3>
-            <button onclick="clearLocalStorage()" class="text-gray-400 text-xs underline">清除本地紀錄</button>
+            <button onclick="fetchFromCloud()" class="text-pink-500 text-xs font-bold border border-pink-200 px-2 py-1 rounded-lg shadow-sm">🔄 同步雲端</button>
         </div>
-        <div id="historyList" class="space-y-3 pb-10"></div>
+        <div id="historyList" class="space-y-3 pb-10">
+            <p class="text-center text-gray-400 py-10">讀取中...</p>
+        </div>
     </div>
 
     <script>
+        // 妳剛更新的網址
         const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwAp65Jjx4XCkV6pG1augL35H9rFuI-2vFewT3hIUMxniqYkovP8bu-x7bJQYvPcZUWpA/exec'; 
         const PRE_WEIGHT = 52.3;
         const DUE_DATE = new Date('2026-04-15');
@@ -68,7 +69,7 @@
             const today = new Date();
             document.getElementById('todayDisplay').innerText = `${today.getMonth()+1}月${today.getDate()}日`;
             calculateWeeks();
-            loadAndRender();
+            fetchFromCloud(); // 開啟 App 時自動同步
         };
 
         function calculateWeeks() {
@@ -82,45 +83,60 @@
             return w;
         }
 
+        // --- 從雲端抓資料 (GET) ---
+        async function fetchFromCloud() {
+            try {
+                const response = await fetch(SCRIPT_URL);
+                const data = await response.json();
+                
+                // 整理 Google Sheet 回傳的陣列
+                const formatted = data.map((row, index) => ({
+                    id: Date.now() + index,
+                    date: new Date(row[0]).toLocaleDateString(),
+                    week: row[1],
+                    weight: row[2],
+                    status: row[3]
+                })).reverse(); // 讓最新日期在最上面
+
+                localStorage.setItem('weightHistory', JSON.stringify(formatted));
+                renderUI();
+            } catch (e) {
+                console.error("雲端讀取失敗");
+                renderUI(); // 失敗則讀取舊的本地紀錄
+            }
+        }
+
+        // --- 存資料到雲端 (POST) ---
         async function handleSave() {
             const weight = parseFloat(document.getElementById('weightInput').value);
-            if (!weight) return alert("請輸入體 weight");
+            if (!weight) return alert("請輸入體重");
 
             const btn = document.getElementById('saveBtn');
             btn.disabled = true;
-            btn.innerText = "同步至雲端...";
+            btn.innerText = "同步中...";
 
             const weekStr = document.getElementById('currentWeek').innerText;
-            const weekNum = parseInt(weekStr);
-            const statusObj = checkStatus(weight, weekNum);
+            const statusText = checkStatus(weight, parseInt(weekStr));
 
             const newData = {
-                date: new Date().toLocaleDateString(),
                 weight: weight,
                 week: weekStr,
-                status: statusObj.text
+                status: statusText
             };
 
             try {
-                // 發送到 Google Sheets
+                // 使用 POST 傳送到 GAS
                 await fetch(SCRIPT_URL, {
                     method: 'POST',
                     mode: 'no-cors',
-                    cache: 'no-cache',
                     body: JSON.stringify(newData)
                 });
                 
-                // 儲存到本地
-                let history = JSON.parse(localStorage.getItem('weightHistory') || '[]');
-                history.unshift(newData);
-                localStorage.setItem('weightHistory', JSON.stringify(history));
-                
-                showAlert(statusObj);
-                loadAndRender();
-                alert("儲存成功！資料已同步至 Google Sheets。");
                 document.getElementById('weightInput').value = '';
+                alert("儲存成功！");
+                await fetchFromCloud(); // 儲存完後自動刷新列表
             } catch (e) {
-                alert("網路連線問題，請稍後再試。");
+                alert("同步失敗，但已儲存。");
             } finally {
                 btn.disabled = false;
                 btn.innerText = "儲存紀錄";
@@ -130,19 +146,12 @@
         function checkStatus(w, week) {
             let min = PRE_WEIGHT + (week < 13 ? 1 : 1 + (week-12)*0.4);
             let max = PRE_WEIGHT + (week < 13 ? 2 : 2 + (week-12)*0.5);
-            if (w > max) return { text: `超標了！(上限: ${max.toFixed(1)}kg)`, color: 'bg-red-50 text-red-500 border-red-100' };
-            if (w < min) return { text: `偏輕了！(下限: ${min.toFixed(1)}kg)`, color: 'bg-blue-50 text-blue-500 border-blue-100' };
-            return { text: `非常合理！(範圍: ${min.toFixed(1)}~${max.toFixed(1)}kg)`, color: 'bg-green-50 text-green-500 border-green-100' };
+            if (w > max) return "超標";
+            if (w < min) return "偏輕";
+            return "正常";
         }
 
-        function showAlert(obj) {
-            const el = document.getElementById('statusAlert');
-            el.className = `block rounded-full py-3 px-6 text-center font-bold mb-6 card-shadow border ${obj.color}`;
-            el.innerText = `💡 ${obj.text}`;
-            el.classList.remove('hidden');
-        }
-
-        function loadAndRender() {
+        function renderUI() {
             const history = JSON.parse(localStorage.getItem('weightHistory') || '[]');
             const listEl = document.getElementById('historyList');
             
@@ -156,8 +165,8 @@
                         <p class="text-[10px] text-gray-400 font-bold">${item.date}</p>
                         <p class="font-black text-gray-700 text-lg">${item.weight} kg <span class="text-pink-400 text-sm ml-1">${item.week}</span></p>
                     </div>
-                    <div class="text-xs font-bold px-3 py-1 rounded-full ${item.status.includes('合理')?'text-green-500 bg-green-50':'text-orange-500 bg-orange-50'}">
-                        ${item.status.split('！')[0]}
+                    <div class="text-xs font-bold px-3 py-1 rounded-full ${item.status === '正常' ? 'text-green-500 bg-green-50' : 'text-orange-500 bg-orange-50'}">
+                        ${item.status}
                     </div>
                 </div>
             `).join('');
@@ -167,8 +176,8 @@
 
         function updateChart(history) {
             const ctx = document.getElementById('weightChart').getContext('2d');
-            const chartData = [...history].reverse().slice(-7); // 只顯示最近 7 筆
-            const labels = chartData.map(i => i.date.split('/')[2] + '日');
+            const chartData = [...history].reverse(); // 圖表需要由舊到新
+            const labels = chartData.map(i => i.date.split('/')[1] + '/' + i.date.split('/')[2]);
             const values = chartData.map(i => i.weight);
 
             if (myChart) myChart.destroy();
@@ -190,13 +199,6 @@
                     scales: { y: { beginAtZero: false } }
                 }
             });
-        }
-
-        function clearLocalStorage() {
-            if(confirm("確定要清除手機本地紀錄嗎？")) {
-                localStorage.removeItem('weightHistory');
-                location.reload();
-            }
         }
     </script>
 </body>
